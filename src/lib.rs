@@ -1,12 +1,17 @@
-use std::collections::BTreeMap;
+#![no_std]
+
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Font {
     pub bitmap: Vec<u8>,
     pub width: u32,
-    pub map16: Vec<Glyph>,
-    pub dict32: BTreeMap<[u16; 2], Glyph>,
+    pub map1: BTreeMap<char, Glyph>,
+    pub map2: BTreeMap<[char; 2], Glyph>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -17,15 +22,15 @@ pub struct Glyph {
 }
 
 impl Font {
-    pub fn lookup(&self, str: &[u16], pos: usize) -> Option<(Glyph, bool)> {
+    pub fn lookup(&self, str: &[char], pos: usize) -> Option<(Glyph, bool)> {
         if pos < str.len() {
             if pos + 1 < str.len() {
-                self.dict32.get(&[str[pos], str[pos + 1]]).copied()
+                self.map2.get(&[str[pos], str[pos + 1]]).copied()
                     .map(|g| (g, true))
-                    .or_else(|| self.map16.get(str[pos] as usize).copied()
+                    .or_else(|| self.map1.get(&str[pos]).copied()
                         .map(|g| (g, false)))
             } else {
-                self.map16.get(str[pos] as usize).copied().map(|g| (g, false))
+                self.map1.get(&str[pos]).copied().map(|g| (g, false))
             }
         } else {
             None

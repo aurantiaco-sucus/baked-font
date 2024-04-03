@@ -4,6 +4,7 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use core::iter::Peekable;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -22,6 +23,14 @@ pub struct Glyph {
 }
 
 impl Font {
+    pub fn lookup_single(&self, c: char) -> Option<Glyph> {
+        self.map1.get(&c).copied()
+    }
+
+    pub fn lookup_double(&self, c1: char, c2: char) -> Option<Glyph> {
+        self.map2.get(&[c1, c2]).copied()
+    }
+
     pub fn lookup(&self, str: &[char], pos: usize) -> Option<(Glyph, bool)> {
         if pos < str.len() {
             if pos + 1 < str.len() {
@@ -35,5 +44,73 @@ impl Font {
         } else {
             None
         }
+    }
+}
+
+pub struct CharSliceGlyphIterator<'a, 'b> {
+    font: &'a Font,
+    str: &'a [char],
+    pos: usize,
+}
+
+impl<'a, 'b> CharSliceGlyphIterator<'a, 'b> {
+    pub fn new(font: &'a Font, str: &'a [char]) -> Self {
+        Self { font, str, pos: 0 }
+    }
+}
+
+impl<'a, 'b> Iterator for CharSliceGlyphIterator<'a, 'b> {
+    type Item = Glyph;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.str.len() {
+            return None;
+        }
+        let mut res = self.font.lookup(self.str, self.pos);
+        while res.is_none() && self.pos < self.str.len() {
+            self.pos += 1;
+            res = self.font.lookup(self.str, self.pos);
+        }
+        if let Some((g, b)) = res {
+            self.pos += if b { 2 } else { 1 };
+            Some(g)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct CharPeekableGlyphIterator<'a, T: Iterator<Item=char>> {
+    font: &'a Font,
+    iter: Peekable<T>,
+}
+
+impl<'a, T: Iterator<Item=char>> CharPeekableGlyphIterator<'a, T> {
+    pub fn new(font: &'a Font, iter: T) -> Self {
+        Self { font, iter: iter.peekable() }
+    }
+}
+
+impl<'a, T: Iterator<Item=char>> Iterator for CharPeekableGlyphIterator<'a, T> {
+    type Item = Glyph;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut cur = self.iter.next();
+        let mut next = self.iter.peek().copied();
+        while let Some(cur) = cur {
+            if let Some(next) = next {
+                if let Some (g) = self.font.lookup_double(cur, next) {
+                    self.iter.next();
+                    return Some(g)
+                } else {
+                    if let Some(g) = self.font.lookup_single(cur) {
+                        return Some(g)
+                    }
+                }
+            } else {
+                return self.font.lookup_single(cur)
+            }
+        }
+        None
     }
 }

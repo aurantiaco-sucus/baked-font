@@ -95,27 +95,29 @@ impl<'a, T: Iterator<Item=char>> Iterator for CharPeekableGlyphIterator<'a, T> {
     type Item = Glyph;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut cur = self.iter.next();
-        let mut next = self.iter.peek().copied();
-        loop {
-            if let Some(c) = cur {
-                let res = self.font.lookup(self.iter.as_slice(), 0);
-                if let Some((g, b)) = res {
-                    self.iter.next();
-                    if b {
-                        cur = next;
-                        next = self.iter.peek().copied();
-                    } else {
-                        cur = None;
+        let cur = self.iter.next();
+        let next = self.iter.peek().copied();
+        if let Some(cc) = cur {
+            if let Some(cn) = next {
+                let res = self.font.lookup_double(cc, cn);
+                if res.is_none() {
+                    let res = self.font.lookup_single(cc);
+                    if res.is_some() {
+                        return res;
                     }
-                    return Some(g);
+                    self.next()
                 } else {
-                    cur = next;
-                    next = self.iter.peek().copied();
+                    res
                 }
             } else {
-                return None;
+                let res = self.font.lookup_single(cc);
+                if res.is_some() {
+                    return res;
+                }
+                self.next()
             }
+        } else {
+            None
         }
     }
 }

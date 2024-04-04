@@ -47,19 +47,19 @@ impl Font {
     }
 }
 
-pub struct CharSliceGlyphIterator<'a, 'b> {
+pub struct CharSliceGlyphIterator<'a> {
     font: &'a Font,
     str: &'a [char],
     pos: usize,
 }
 
-impl<'a, 'b> CharSliceGlyphIterator<'a, 'b> {
+impl<'a> CharSliceGlyphIterator<'a> {
     pub fn new(font: &'a Font, str: &'a [char]) -> Self {
         Self { font, str, pos: 0 }
     }
 }
 
-impl<'a, 'b> Iterator for CharSliceGlyphIterator<'a, 'b> {
+impl<'a> Iterator for CharSliceGlyphIterator<'a> {
     type Item = Glyph;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -97,20 +97,39 @@ impl<'a, T: Iterator<Item=char>> Iterator for CharPeekableGlyphIterator<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         let mut cur = self.iter.next();
         let mut next = self.iter.peek().copied();
-        while let Some(cur) = cur {
-            if let Some(next) = next {
-                if let Some (g) = self.font.lookup_double(cur, next) {
+        loop {
+            if let Some(c) = cur {
+                let res = self.font.lookup(self.iter.as_slice(), 0);
+                if let Some((g, b)) = res {
                     self.iter.next();
-                    return Some(g)
-                } else {
-                    if let Some(g) = self.font.lookup_single(cur) {
-                        return Some(g)
+                    if b {
+                        cur = next;
+                        next = self.iter.peek().copied();
+                    } else {
+                        cur = None;
                     }
+                    return Some(g);
+                } else {
+                    cur = next;
+                    next = self.iter.peek().copied();
                 }
             } else {
-                return self.font.lookup_single(cur)
+                return None;
             }
         }
-        None
+    }
+}
+
+impl Font {
+    pub fn lookup_slice<'a>(&'a self, str: &'a [char]) -> CharSliceGlyphIterator {
+        CharSliceGlyphIterator::new(self, str)
+    }
+
+    pub fn lookup_peekable<T: Iterator<Item=char>>(&self, iter: T) -> CharPeekableGlyphIterator<T> {
+        CharPeekableGlyphIterator::new(self, iter)
+    }
+
+    pub fn lookup_string<'a>(&'a self, str: &'a str) -> CharPeekableGlyphIterator<impl Iterator<Item=char> + 'a> {
+        self.lookup_peekable(str.chars())
     }
 }

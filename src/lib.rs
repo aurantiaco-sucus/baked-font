@@ -14,7 +14,6 @@ pub struct Font {
     pub map1: BTreeMap<char, Glyph>,
     pub map2: BTreeMap<[char; 2], Glyph>,
 }
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Glyph {
     pub pos: (u32, u32),
@@ -31,18 +30,64 @@ impl Font {
         self.map2.get(&[c1, c2]).copied()
     }
 
-    pub fn lookup(&self, str: &[char], pos: usize) -> Option<(Glyph, bool)> {
+    pub fn lookup(&self, str: &[char], pos: usize) -> Option<GlyphResult> {
         if pos < str.len() {
             if pos + 1 < str.len() {
-                self.map2.get(&[str[pos], str[pos + 1]]).copied()
-                    .map(|g| (g, true))
-                    .or_else(|| self.map1.get(&str[pos]).copied()
-                        .map(|g| (g, false)))
+                if let Some(g) = self.map2.get(&[str[pos], str[pos + 1]]) {
+                    Some(GlyphResult::Double(*g, [str[pos], str[pos + 1]]))
+                } else {
+                    Some(self.lookup_single_gr(str[pos]))
+                }
             } else {
-                self.map1.get(&str[pos]).copied().map(|g| (g, false))
+                Some(self.lookup_single_gr(str[pos]))
             }
         } else {
             None
+        }
+    }
+
+    fn lookup_single_gr(&self, ch: char) -> GlyphResult {
+        if let Some(g) = self.map1.get(&ch) {
+            GlyphResult::Single(*g, ch)
+        } else {
+            GlyphResult::Unknown(ch)
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum GlyphResult {
+    Unknown(char),
+    Single(Glyph, char),
+    Double(Glyph, [char; 2]),
+}
+
+impl GlyphResult {
+    pub const fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown(_))
+    }
+
+    pub const fn is_single(&self) -> bool {
+        matches!(self, Self::Single(_, _))
+    }
+
+    pub const fn is_double(&self) -> bool {
+        matches!(self, Self::Double(_, _))
+    }
+
+    pub fn first_char(&self) -> char {
+        match self {
+            Self::Unknown(c) => *c,
+            Self::Single(_, c) => *c,
+            Self::Double(_, [c, _]) => *c,
+        }
+    }
+
+    pub fn char_len(&self) -> usize {
+        match self {
+            Self::Unknown(_) => 1,
+            Self::Single(_, _) => 1,
+            Self::Double(_, _) => 2,
         }
     }
 }
@@ -60,23 +105,12 @@ impl<'a> CharSliceGlyphIterator<'a> {
 }
 
 impl<'a> Iterator for CharSliceGlyphIterator<'a> {
-    type Item = Glyph;
+    type Item = GlyphResult;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.str.len() {
-            return None;
-        }
-        let mut res = self.font.lookup(self.str, self.pos);
-        while res.is_none() && self.pos < self.str.len() {
-            self.pos += 1;
-            res = self.font.lookup(self.str, self.pos);
-        }
-        if let Some((g, b)) = res {
-            self.pos += if b { 2 } else { 1 };
-            Some(g)
-        } else {
-            None
-        }
+        let res = self.font.lookup(self.str, self.pos)?;
+        self.pos += res.char_len();
+        Some(res)
     }
 }
 
@@ -92,29 +126,20 @@ impl<'a, T: Iterator<Item=char>> CharPeekableGlyphIterator<'a, T> {
 }
 
 impl<'a, T: Iterator<Item=char>> Iterator for CharPeekableGlyphIterator<'a, T> {
-    type Item = Glyph;
+    type Item = GlyphResult;
 
     fn next(&mut self) -> Option<Self::Item> {
         let cur = self.iter.next();
         let next = self.iter.peek().copied();
-        if let Some(cc) = cur {
-            if let Some(cn) = next {
-                let res = self.font.lookup_double(cc, cn);
-                if res.is_none() {
-                    let res = self.font.lookup_single(cc);
-                    if res.is_some() {
-                        return res;
-                    }
-                    self.next()
+        if let Some(c) = cur {
+            if let Some(n) = next {
+                if let Some(g) = self.font.lookup_double(c, n) {
+                    Some(GlyphResult::Double(g, [c, n]))
                 } else {
-                    res
+                    Some(self.font.lookup_single_gr(c))
                 }
             } else {
-                let res = self.font.lookup_single(cc);
-                if res.is_some() {
-                    return res;
-                }
-                self.next()
+                Some(self.font.lookup_single_gr(c))
             }
         } else {
             None
@@ -131,7 +156,7 @@ impl Font {
         CharPeekableGlyphIterator::new(self, iter)
     }
 
-    pub fn lookup_string<'a>(&'a self, str: &'a str) -> CharPeekableGlyphIterator<impl Iterator<Item=char> + 'a> {
+    pub fn lookup_string<'a>(&'a self, str: &'a str) -> CharPeekableGlyphIterator<core::str::Chars<'a>> {
         self.lookup_peekable(str.chars())
     }
 }
